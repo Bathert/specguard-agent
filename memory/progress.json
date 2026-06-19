@@ -1,10 +1,10 @@
 {
   "feature": "Task Manager API",
-  "last_updated": "2026-06-19T20:30:06.907511+00:00",
+  "last_updated": "2026-06-19T21:59:41.720375+00:00",
   "scenarios": {
     "Create a new task": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907300+00:00",
+      "last_change": "2026-06-19T21:59:41.720132+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -13,7 +13,7 @@
     },
     "Assign a task to a user": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907482+00:00",
+      "last_change": "2026-06-19T21:59:41.720278+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -22,7 +22,7 @@
     },
     "Complete a task": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907485+00:00",
+      "last_change": "2026-06-19T21:59:41.720295+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -31,7 +31,7 @@
     },
     "List tasks by status": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907489+00:00",
+      "last_change": "2026-06-19T21:59:41.720309+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -40,7 +40,7 @@
     },
     "Prevent duplicate task titles": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907493+00:00",
+      "last_change": "2026-06-19T21:59:41.720322+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -49,13 +49,16 @@
     },
     "Validate task priority": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907495+00:00",
+      "last_change": "2026-06-19T21:59:41.720335+00:00",
       "test_result": "pass",
-      "files": []
+      "files": [
+        "src/task_manager.py",
+        "evals/test_task_manager.py"
+      ]
     },
     "Search tasks by keyword": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907498+00:00",
+      "last_change": "2026-06-19T21:59:41.720348+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -64,7 +67,7 @@
     },
     "Delete a task": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907502+00:00",
+      "last_change": "2026-06-19T21:59:41.720360+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -73,7 +76,7 @@
     },
     "Cannot assign a completed task": {
       "status": "tested",
-      "last_change": "2026-06-19T20:30:06.907504+00:00",
+      "last_change": "2026-06-19T21:59:41.720371+00:00",
       "test_result": "pass",
       "files": [
         "src/task_manager.py",
@@ -86,8 +89,8 @@
     "test_pass_pct": 100.0,
     "regressions": 0,
     "regression_names": [],
-    "tests_total": 16,
-    "tests_passed": 16,
+    "tests_total": 36,
+    "tests_passed": 36,
     "tests_failed": 0
   }
 }

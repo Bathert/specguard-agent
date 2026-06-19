@@ -15,6 +15,11 @@ After each code-generator + security-scanner cycle, or when user asks "status", 
 
 ### 2. Map scenarios to status
 
+Use `evals/scenario_map.json` as the explicit mapping from a scenario name to
+pytest node IDs and implementation/test files. Never infer a match from a test
+name prefix. A parametrized node reference passes only when every collected
+parameter instance passes.
+
 | Status | Meaning |
 |--------|---------|
 | `not_started` | No code written |
@@ -73,4 +78,5 @@ Save to `memory/progress.json`:
 ## Pitfalls
 - Scenario Outlines expand to N scenarios (one per Examples row) — track each separately
 - Background steps are not separate scenarios
-- A scenario marked `implemented` without a test file should be flagged
+- Do not overwrite a previous dashboard when pytest is unavailable or cannot collect tests
+- A scenario marked `implemented` without mapped implementation and test files should be flagged

@@ -71,8 +71,10 @@ def run_pytest(test_dir: str, timeout: int = 60) -> dict[str, Any]:
             tests[match.group("nodeid")] = _OUTCOME_MAP[match.group("outcome")]
 
     grouped = {
-        outcome: sorted(node_id for node_id, result in tests.items() if result == outcome)
-        for outcome in ("passed", "failed", "error", "skipped")
+        "passed": sorted(node_id for node_id, result in tests.items() if result == "passed"),
+        "failed": sorted(node_id for node_id, result in tests.items() if result == "failed"),
+        "errors": sorted(node_id for node_id, result in tests.items() if result == "error"),
+        "skipped": sorted(node_id for node_id, result in tests.items() if result == "skipped"),
     }
 
     execution_error = None

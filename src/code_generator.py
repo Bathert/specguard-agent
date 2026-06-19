@@ -38,19 +38,20 @@ def render_scaffold(plan: dict[str, Any]) -> str:
         "",
         "",
         f"class {class_name}:",
-        f'    """Traceable implementation scaffold for: {plan["feature"]}."""',
+        f"    {('Traceable implementation scaffold for: ' + plan['feature'])!r}",
         "",
         "    def __init__(self) -> None:",
         "        self._state: dict[str, Any] = {}",
     ]
 
     for action, scenarios in sorted(action_scenarios.items()):
+        message = f"Implement `{action}` for: {', '.join(scenarios)}"
         lines.extend(["", f"    # Traces to: {', '.join(repr(name) for name in scenarios)}"])
         lines.extend([
             f"    def {action}(self, **payload: Any) -> None:",
             f'        """Implement the `{action}` action from the feature specification."""',
             "        raise NotImplementedError(",
-            f'            "Implement `{action}` for: {", ".join(scenarios)}"',
+            f"            {message!r},",
             "        )",
         ])
 

@@ -16,6 +16,7 @@ from typing import Optional
 class Step:
     keyword: str  # Given, When, Then, And, But
     text: str
+    data_table: list[list[str]] = field(default_factory=list)
 
 
 @dataclass
@@ -46,9 +47,27 @@ def parse_feature_file(path: str) -> tuple[str, list[str]]:
         content = f.read()
     lines = content.splitlines()
 
-    feature_match = re.search(r"^Feature:\s*(.+)$", content, re.MULTILINE)
+    feature_match = re.search(r"^\s*Feature:\s*(.+)$", content, re.MULTILINE)
     feature_name = feature_match.group(1).strip() if feature_match else "Unknown"
     return feature_name, lines
+
+
+def extract_feature_description(lines: list[str]) -> str:
+    """Return prose between the Feature line and the first executable section."""
+    description = []
+    in_description = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("Feature:"):
+            in_description = True
+            continue
+        if not in_description:
+            continue
+        if re.match(r"^(Background|Scenario(?:\s+Outline)?|Rule):", stripped):
+            break
+        if stripped and not stripped.startswith("#") and not stripped.startswith("@"):
+            description.append(stripped)
+    return " ".join(description)
 
 
 def _classify_step(keyword: str, text: str, prev_keyword: str) -> str:
@@ -108,6 +127,15 @@ def parse_scenarios(lines: list[str]) -> tuple[list[Step], list[Scenario]]:
                     example_headers = cells
                 else:
                     current.examples.append(dict(zip(example_headers, cells)))
+            continue
+
+        # Data tables belong to the preceding Background or Scenario step.
+        if "|" in stripped:
+            target_steps = background if in_background else current.steps if current else []
+            if target_steps:
+                target_steps[-1].data_table.append(
+                    [cell.strip() for cell in stripped.strip("|").split("|")]
+                )
             continue
 
         # Steps
@@ -170,7 +198,14 @@ def expand_outline(scenario: Scenario) -> list[list[Step]]:
             new_text = step.text
             for key, value in example.items():
                 new_text = new_text.replace(f"<{key}>", value)
-            expanded_steps.append(Step(keyword=step.keyword, text=new_text))
+            expanded_table = [
+                [
+                    cell.replace(f"<{key}>", value)
+                    for cell in row
+                ]
+                for row in step.data_table
+            ]
+            expanded_steps.append(Step(keyword=step.keyword, text=new_text, data_table=expanded_table))
         expanded.append(expanded_steps)
     return expanded
 
@@ -218,6 +253,7 @@ def analyze_spec(path: str) -> dict:
         feature, description, scenarios_count, warnings, tasks
     """
     feature_name, lines = parse_feature_file(path)
+    description = extract_feature_description(lines)
     background, scenarios = parse_scenarios(lines)
 
     # Expand outlines
@@ -234,9 +270,16 @@ def analyze_spec(path: str) -> dict:
 
     return {
         "feature": feature_name,
+        "description": description,
         "background_steps": len(background),
         "scenarios_count": len(scenarios),
-        "scenarios": [{"name": s.name, "is_outline": s.is_outline, "steps_count": len(s.steps), "examples_count": len(s.examples)} for s in scenarios],
+        "scenarios": [{
+            "name": s.name,
+            "is_outline": s.is_outline,
+            "steps_count": len(s.steps),
+            "examples_count": len(s.examples),
+            "data_table_rows": sum(len(step.data_table) for step in s.steps),
+        } for s in scenarios],
         "warnings": all_warnings,
         "tasks": tasks,
     }

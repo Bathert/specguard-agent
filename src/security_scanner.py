@@ -38,8 +38,14 @@ INJECTION_PATTERNS = [
     (r"\beval\s*\(", "Code injection: eval()"),
     (r"\bexec\s*\(", "Code injection: exec()"),
     (r"innerHTML\s*=\s*[^\"]'", "XSS: innerHTML with non-literal"),
-    (r"Markup\s*\(", "XSS: Markup() without escaping"),
     (r"shell\s*=\s*True", "Subprocess with shell=True"),
+]
+
+OUTPUT_SANITIZATION_PATTERNS = [
+    (r"\bMarkup\s*\(", "HTML marked safe without an escaping audit"),
+    (r"render_template_string\s*\(\s*f[\"']", "Template rendered from an f-string"),
+    (r"\b(?:Response|make_response)\s*\(\s*f[\"']", "HTTP response rendered from an f-string"),
+    (r"\breturn\s+f[\"'][^\"']*<[A-Za-z][^\"']*\{", "HTML returned with interpolated data"),
 ]
 
 VALIDATION_PATTERNS = [
@@ -61,6 +67,8 @@ STDLIB_PKGS = {
     "itertools", "math", "random", "time", "logging", "enum",
     "pytest", "src", "scripts", "__future__", "csv", "base64",
     "hashlib", "ssl", "socket", "threading", "queue", "signal",
+    "keyword", "subprocess", "importlib", "ast", "textwrap", "tempfile",
+    "shutil", "unittest", "xml",
 }
 
 
@@ -92,6 +100,7 @@ def _is_pattern_line(line: str) -> bool:
         or stripped.startswith("(r'")
         or stripped.startswith('SECRET_PATTERNS')
         or stripped.startswith('INJECTION_PATTERNS')
+        or stripped.startswith('OUTPUT_SANITIZATION_PATTERNS')
         or stripped.startswith('VALIDATION_PATTERNS')
         or stripped.startswith('STDLIB_PKGS')
         or stripped.startswith('SKIP_DIRS')
@@ -134,9 +143,11 @@ def scan_injections(lines: list[str], filepath: str) -> list[Issue]:
             if "Subprocess call" in name:
                 # Look at the full call — if all args are literals, skip
                 # Get the next few lines to see the full call
-                call_text = "".join(lines[i-1:min(i+5, len(lines))])
-                # If the call uses sys.executable and a list of string literals, it's safe
-                if "sys.executable" in call_text or "[sys" in call_text:
+                call_text = "".join(lines[max(0, i-6):min(i+5, len(lines))])
+                # A list argument with shell=False cannot be interpreted as shell
+                # syntax. This includes commands built around sys.executable.
+                list_command = re.search(r"\b(?:command|cmd)\s*=\s*\[", call_text)
+                if "sys.executable" in call_text or "[sys" in call_text or list_command:
                     # Check if any user-controlled variable is in the call
                     # Safe patterns: subprocess.run([sys.executable, "-m", "pytest", ...])
                     if not re.search(r"subprocess\.\w+\(.*\b(user|input|request|argv|args)\b", call_text):
@@ -194,6 +205,26 @@ def scan_input_validation(lines: list[str], filepath: str) -> list[Issue]:
     return issues
 
 
+def scan_output_sanitization(lines: list[str], filepath: str) -> list[Issue]:
+    """Pillar 5: flag interpolated output that needs context-aware escaping."""
+    issues = []
+    for i, line in enumerate(lines, 1):
+        stripped = line.lstrip()
+        if stripped.startswith("#") or _is_pattern_line(line):
+            continue
+        for pattern, description in OUTPUT_SANITIZATION_PATTERNS:
+            if re.search(pattern, line):
+                issues.append(Issue(
+                    severity="high",
+                    pillar="output_sanitization",
+                    file=filepath,
+                    line=i,
+                    description=description,
+                    fix="Escape untrusted data for its output context before rendering it",
+                ))
+    return issues
+
+
 def scan_packages(lines: list[str], filepath: str) -> tuple[list[Issue], int, int]:
     """Pillar 1: Package verification (anti-slopsquatting).
     Returns (issues, packages_checked, packages_flagged).
@@ -239,8 +270,15 @@ def scan_packages(lines: list[str], filepath: str) -> tuple[list[Issue], int, in
                 description=f"Package '{pkg}' not found on PyPI — possible slopsquatting",
                 fix="Verify package name or remove the import",
             ))
-        except Exception:
-            pass
+        except Exception as error:
+            issues.append(Issue(
+                severity="low",
+                pillar="package_verification",
+                file=filepath,
+                line=0,
+                description=f"Could not verify package '{pkg}' against PyPI: {error}",
+                fix="Retry with network access; an unavailable registry is not proof of provenance",
+            ))
 
     return issues, checked, flagged
 
@@ -277,6 +315,7 @@ def scan_file(filepath: str, check_packages: bool = True) -> tuple[list[Issue], 
     issues.extend(scan_secrets(lines, filepath))
     issues.extend(scan_injections(lines, filepath))
     issues.extend(scan_input_validation(lines, filepath))
+    issues.extend(scan_output_sanitization(lines, filepath))
     issues.extend(scan_traceability(lines, filepath))
 
     pkg_checked = 0
@@ -298,17 +337,20 @@ def scan_directory(directory: str, check_packages: bool = True) -> dict:
     total_packages_checked = 0
     total_packages_flagged = 0
 
-    for root, dirs, files in os.walk(directory):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
-        for fname in files:
-            if not fname.endswith(".py"):
-                continue
-            filepath = os.path.join(root, fname)
-            issues, pkg_checked, pkg_flagged = scan_file(filepath, check_packages)
-            all_issues.extend(issues)
-            files_scanned += 1
-            total_packages_checked += pkg_checked
-            total_packages_flagged += pkg_flagged
+    if os.path.isfile(directory):
+        paths = [directory] if directory.endswith(".py") else []
+    else:
+        paths = []
+        for root, dirs, files in os.walk(directory):
+            dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+            paths.extend(os.path.join(root, name) for name in files if name.endswith(".py"))
+
+    for filepath in paths:
+        issues, pkg_checked, pkg_flagged = scan_file(filepath, check_packages)
+        all_issues.extend(issues)
+        files_scanned += 1
+        total_packages_checked += pkg_checked
+        total_packages_flagged += pkg_flagged
 
     critical = sum(1 for i in all_issues if i.severity == "critical")
     high = sum(1 for i in all_issues if i.severity == "high")
@@ -337,6 +379,7 @@ def scan_directory(directory: str, check_packages: bool = True) -> dict:
             "secrets_found": sum(1 for i in all_issues if i.pillar == "secret_detection"),
             "injections_found": sum(1 for i in all_issues if i.pillar == "injection_audit"),
             "validation_gaps": sum(1 for i in all_issues if i.pillar == "input_validation"),
+            "output_sanitization_gaps": sum(1 for i in all_issues if i.pillar == "output_sanitization"),
             "traceability_gaps": sum(1 for i in all_issues if i.pillar == "traceability"),
         },
     }

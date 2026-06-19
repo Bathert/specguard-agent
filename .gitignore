@@ -2,3 +2,8 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .DS_Store
+.venv/
+build/
+*.egg-info/
+.env
+tmp_video_llm/

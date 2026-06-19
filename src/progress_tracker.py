@@ -106,17 +106,20 @@ def update_progress(
         entry = scenario_map.get(name, {})
         expected_tests = entry.get("tests", [])
         files = entry.get("files", [])
-        prev_status = prev_scenarios.get(name, {}).get("status", "not_started")
         prev_test = prev_scenarios.get(name, {}).get("test_result", None)
-        matched_results = [
-            result
+        results_by_reference = {
+            reference: [
+                result
+                for node_id, result in test_results.get("tests", {}).items()
+                if _matches_node_id(reference, node_id)
+            ]
             for reference in expected_tests
-            for node_id, result in test_results.get("tests", {}).items()
-            if _matches_node_id(reference, node_id)
-        ]
+        }
+        matched_results = [result for results in results_by_reference.values() for result in results]
+        every_expected_test_reported = bool(expected_tests) and all(results_by_reference.values())
         all_files_exist = bool(files) and all(Path(path).is_file() for path in files)
 
-        if expected_tests and matched_results and all(result == "passed" for result in matched_results):
+        if every_expected_test_reported and all(result == "passed" for result in matched_results):
             status = "tested"
             test_result = "pass"
         elif any(result in ("failed", "error") for result in matched_results):
@@ -176,7 +179,11 @@ def get_dashboard(progress_path: str) -> str:
     feature = data.get("feature", "Unknown")
 
     total = len(scenarios)
-    implemented = sum(1 for s in scenarios.values() if s["status"] in ("implemented", "tested"))
+    implemented = sum(
+        1
+        for s in scenarios.values()
+        if s["status"] in ("implemented", "tested", "in_progress", "regression")
+    )
     tested = sum(1 for s in scenarios.values() if s["status"] == "tested")
     regressions = metrics.get("regressions", 0)
 
@@ -211,7 +218,7 @@ def get_dashboard(progress_path: str) -> str:
         if not_started:
             lines.append(f"  NEXT: Implement '{not_started[0]}'")
         elif tested == total:
-            lines.append("  NEXT: All scenarios tested. Ready for deployment.")
+            lines.append("  NEXT: All scenarios tested. Ready for release review.")
         else:
             lines.append("  NEXT: Run tests to verify implementation.")
 
@@ -240,7 +247,7 @@ def recommend_next(progress_path: str) -> str:
     total = len(scenarios)
     tested = sum(1 for s in scenarios.values() if s["status"] == "tested")
     if tested == total:
-        return "All scenarios tested. Ready for deployment."
+        return "All scenarios tested. Ready for release review."
 
     return "Run tests to verify implementation."
 

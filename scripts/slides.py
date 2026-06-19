@@ -199,6 +199,41 @@ def make_terminal_frame(title: str, lines: list, output_path: str):
     print(f"  Saved: {output_path}")
 
 
+def make_case_study_frame(title: str, spec_lines: list, code_lines: list, output_path: str):
+    """Render a polished before/after case study: Gherkin on the left, code on the right."""
+    img = Image.new("RGB", (WIDTH, HEIGHT), COLORS["bg_dark"])
+    draw = ImageDraw.Draw(img)
+    accent = COLORS["accent_green"]
+
+    for i in range(260):
+        alpha = int(14 * (1 - i / 260))
+        draw.line([(0, i), (WIDTH, i)], fill=(15 + alpha, 15 + alpha, 30 + alpha))
+    _draw_accent_bar(draw, 0, 0, WIDTH, 6, accent)
+    _center_text(draw, title, get_font(58, weight="bold"), 80, color=COLORS["text_white"])
+    _center_text(draw, "A real spec becomes a reviewed implementation", get_font(28, weight="light"), 165, color=COLORS["text_gray"])
+
+    cards = [
+        (100, 245, 900, 875, "Gherkin specification", spec_lines, COLORS["accent_red"]),
+        (1020, 245, 1820, 875, "Guarded generated Python", code_lines, COLORS["accent_green"]),
+    ]
+    for x0, y0, x1, y1, label, lines, label_color in cards:
+        _draw_rounded_rect(draw, (x0, y0, x1, y1), 20, COLORS["bg_card"])
+        _draw_rounded_rect(draw, (x0, y0, x1, y0 + 58), 20, (39, 39, 59))
+        draw.rectangle([x0, y0 + 38, x1, y0 + 58], fill=(39, 39, 59))
+        draw.text([x0 + 30, y0 + 14], label, fill=label_color, font=get_font(23, weight="bold"))
+        y = y0 + 88
+        for line in lines[:20]:
+            color = label_color if line.startswith(("Feature:", "Scenario:", "def ", "class ", "return ", "raise ")) else COLORS["text_white"]
+            draw.text([x0 + 28, y], line, fill=color, font=get_font(20, mono=True))
+            y += 31
+
+    _draw_rounded_rect(draw, (650, 915, 1270, 985), 30, (0, 110, 92))
+    _center_text(draw, "Spec -> response -> parse -> scan -> write", get_font(23, weight="bold"), 936, color=COLORS["text_white"])
+    draw.text([60, HEIGHT - 34], "SpecGuard / case study", fill=COLORS["text_dim"], font=get_font(18))
+    img.save(output_path, "PNG")
+    print(f"  Saved: {output_path}")
+
+
 if __name__ == "__main__":
     os.makedirs("/tmp/slides2", exist_ok=True)
     make_slide({
