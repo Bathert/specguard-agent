@@ -1,0 +1,66 @@
+{
+  "feature": "Task Manager API",
+  "last_updated": "2026-06-19T00:00:00Z",
+  "scenarios": {
+    "Create a new task": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Assign a task to a user": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Complete a task": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "List tasks by status": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Prevent duplicate task titles": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Validate task priority (urgent)": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Validate task priority (critical)": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Validate task priority (unknown)": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Search tasks by keyword": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Delete a task": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    },
+    "Cannot assign a completed task": {
+      "status": "tested",
+      "test_result": "pass",
+      "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+    }
+  },
+  "metrics": {
+    "coverage_pct": 100.0,
+    "test_pass_pct": 100.0,
+    "regressions": 0
+  }
+}
