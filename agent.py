@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 SpecGuard CLI — Spec-Driven Development Agent
 
@@ -13,6 +14,7 @@ Usage:
   python3 agent.py                    # Full pipeline with defaults
   python3 agent.py --spec specs/X.feature
   python3 agent.py analyze            # Just analyze spec
+  python3 agent.py llm-generate       # Generate implementation through configured LLM
   python3 agent.py scan               # Just security scan
   python3 agent.py test               # Just run tests
   python3 agent.py track              # Just update progress + dashboard
@@ -20,6 +22,7 @@ Usage:
 import sys
 import os
 import argparse
+from pathlib import Path
 
 # Ensure src/ is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +61,7 @@ def run_scan(src_dir: str, check_packages: bool = True) -> dict:
     print(f"  Secrets:         {stats['secrets_found']}")
     print(f"  Injections:      {stats['injections_found']}")
     print(f"  Validation gaps: {stats['validation_gaps']}")
+    print(f"  Output gaps:     {stats['output_sanitization_gaps']}")
     if report["issues"]:
         print("\n  ISSUES:")
         for issue in report["issues"]:
@@ -126,6 +130,79 @@ def run_generate(spec_path: str, output_path: str, overwrite: bool = False) -> d
     return result
 
 
+def run_llm_generate(
+    spec_path: str,
+    output_path: str,
+    *,
+    overwrite: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    dry_run: bool = False,
+    output_contract: str | None = None,
+    response_file: str | None = None,
+) -> dict:
+    """Generate reviewed implementation code through an environment-configured LLM."""
+    from src.llm_core import (
+        LLMError,
+        LLMConfig,
+        build_implementation_prompt,
+        create_client,
+        generate_with_llm,
+        ReplayClient,
+    )
+
+    print("\n🧠 PHASE 2: LLM CODE GENERATION")
+    print("━" * 50)
+    selected_provider = provider or os.environ.get("SPEC_GUARD_LLM_PROVIDER", "gemini")
+    selected_model = model or os.environ.get("SPEC_GUARD_LLM_MODEL", "gemini-2.5-flash")
+
+    if dry_run:
+        plan, prompt = build_implementation_prompt(spec_path, output_contract=output_contract)
+        print("  Mode:        dry run (no provider request)")
+        print(f"  Provider:    {selected_provider}")
+        print(f"  Model:       {selected_model}")
+        print(f"  Feature:     {plan['feature']}")
+        print(f"  Scenarios:   {plan['scenarios_count']}")
+        print(f"  Prompt size: {len(prompt)} characters")
+        print(f"  Output:      {output_path}")
+        print("  Guardrails:  fenced Python → parse → static security scan → atomic write")
+        print("━" * 50)
+        return {"success": True, "dry_run": True, "feature": plan["feature"]}
+
+    try:
+        if response_file:
+            response_path = Path(response_file)
+            client = ReplayClient(response_path.read_text(encoding="utf-8"), response_path.name)
+        else:
+            config = LLMConfig.from_environment(
+                provider=provider,
+                model=model,
+                base_url=base_url,
+            )
+            client = create_client(config)
+        result = generate_with_llm(
+            spec_path,
+            output_path,
+            client,
+            overwrite=overwrite,
+            output_contract=output_contract,
+        )
+    except (LLMError, FileExistsError) as error:
+        print(f"  [!] {error}")
+        print("━" * 50)
+        return {"success": False, "error": str(error)}
+
+    print(f"  Provider:    {result['provider']}")
+    print(f"  Model:       {result['model']}")
+    print(f"  Feature:     {result['feature']}")
+    print(f"  Scenarios:   {result['scenarios']}")
+    print(f"  Warnings:    {result['security_warnings']}")
+    print(f"  Generated:   {result['output']}")
+    print("━" * 50)
+    return {"success": True, **result}
+
+
 def run_full_pipeline(
     spec_path: str,
     src_dir: str,
@@ -155,8 +232,10 @@ def run_full_pipeline(
         print("  Run with --generate to create a traceable scaffold.")
         print("━" * 50)
 
-    # Phase 3: Security scan
-    scan_result = run_scan(src_dir, check_packages=check_packages)
+    # Phase 3: Security scan. When a scaffold was just generated, scan that
+    # artifact rather than accidentally reporting on unrelated framework code.
+    scan_target = output_path if generate else src_dir
+    scan_result = run_scan(scan_target, check_packages=check_packages)
 
     # Phase 4: Evaluation
     test_result = run_tests(test_dir)
@@ -171,7 +250,11 @@ def run_full_pipeline(
     print(f"║  Spec:       {analyze_result['scenarios_count']} scenarios".ljust(52) + "║")
     print(f"║  Warnings:   {len(analyze_result['warnings'])}".ljust(52) + "║")
     print(f"║  Security:   {scan_result['verdict']}".ljust(52) + "║")
-    print(f"║  Tests:       {test_result['passed']} passed, {test_result['failed']} failed".ljust(52) + "║")
+    test_summary = (
+        f"║  Tests:       {len(test_result['passed'])} passed, "
+        f"{len(test_result['failed']) + len(test_result['errors'])} failed"
+    )
+    print(test_summary.ljust(52) + "║")
     print("╚" + "═" * 50 + "╝")
     print()
     return int(
@@ -185,7 +268,7 @@ def run_full_pipeline(
 def main() -> int:
     parser = argparse.ArgumentParser(description="SpecGuard — Spec-Driven Development Agent")
     parser.add_argument("command", nargs="?", default="full",
-                        choices=["full", "analyze", "generate", "scan", "test", "track"],
+                        choices=["full", "analyze", "generate", "llm-generate", "scan", "test", "track"],
                         help="Pipeline phase to run (default: full)")
     parser.add_argument("--spec", default="specs/task-manager.feature",
                         help="Path to Gherkin .feature file")
@@ -203,6 +286,18 @@ def main() -> int:
                         help="Output path for the generated scaffold")
     parser.add_argument("--overwrite", action="store_true",
                         help="Allow the generate command to replace an existing output file")
+    parser.add_argument("--llm-provider", choices=["gemini", "openai"],
+                        help="LLM provider (default: SPEC_GUARD_LLM_PROVIDER or gemini)")
+    parser.add_argument("--llm-model",
+                        help="LLM model (default: SPEC_GUARD_LLM_MODEL or provider default)")
+    parser.add_argument("--llm-base-url",
+                        help="Override the provider API base URL; useful for compatible gateways")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="For llm-generate: build and validate the request without an API call")
+    parser.add_argument("--llm-contract",
+                        help="Additional output contract for llm-generate, such as a required public API")
+    parser.add_argument("--llm-response-file",
+                        help="Offline replay response for deterministic demos; skips the provider request")
     parser.add_argument("--no-packages", action="store_true",
                         help="Skip PyPI package verification (offline mode)")
 
@@ -228,6 +323,20 @@ def main() -> int:
     elif args.command == "generate":
         run_generate(args.spec, args.output, overwrite=args.overwrite)
         return 0
+    elif args.command == "llm-generate":
+        output_path = args.output if args.output != "generated/feature_scaffold.py" else "generated/feature_llm.py"
+        result = run_llm_generate(
+            args.spec,
+            output_path,
+            overwrite=args.overwrite,
+            provider=args.llm_provider,
+            model=args.llm_model,
+            base_url=args.llm_base_url,
+            dry_run=args.dry_run,
+            output_contract=args.llm_contract,
+            response_file=args.llm_response_file,
+        )
+        return int(not result["success"])
     elif args.command == "scan":
         return int(run_scan(args.src, check_packages=check_pkgs)["verdict"] == "fail")
     elif args.command == "test":
