@@ -19,9 +19,7 @@ Usage:
 """
 import sys
 import os
-import json
 import argparse
-import subprocess
 
 # Ensure src/ is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -70,45 +68,75 @@ def run_scan(src_dir: str, check_packages: bool = True) -> dict:
 
 def run_tests(test_dir: str) -> dict:
     """Phase 4: Run evaluation tests."""
+    from src.evaluation_runner import run_pytest
+
     print("\n🧪 PHASE 4: EVALUATION")
     print("━" * 50)
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", test_dir, "-v", "--tb=short"],
-            capture_output=True, text=True, timeout=30,
-        )
-        output = result.stdout + result.stderr
-        # Print last 20 lines of test output
-        lines = output.strip().splitlines()
-        for line in lines[-20:]:
-            print(f"  {line}")
-        passed = sum(1 for l in lines if " PASSED" in l)
-        failed = sum(1 for l in lines if " FAILED" in l)
-        print(f"\n  Result: {passed} passed, {failed} failed")
-        print("━" * 50)
-        return {"passed": passed, "failed": failed, "output": output}
-    except FileNotFoundError:
-        print("  [!] pytest not found. Install: pip3 install pytest")
-        print("━" * 50)
-        return {"passed": 0, "failed": 0, "error": "pytest not found"}
-    except Exception as e:
-        print(f"  [!] Error: {e}")
-        print("━" * 50)
-        return {"passed": 0, "failed": 0, "error": str(e)}
+    result = run_pytest(test_dir)
+    lines = result["output"].strip().splitlines()
+    for line in lines[-20:]:
+        print(f"  {line}")
+    if result["error"]:
+        print(f"  [!] {result['error']}")
+    print(
+        f"\n  Result: {len(result['passed'])} passed, {len(result['failed'])} failed, "
+        f"{len(result['errors'])} errors"
+    )
+    print("━" * 50)
+    return result
 
 
-def run_track(spec_path: str, progress_path: str) -> dict:
+def run_track(
+    spec_path: str,
+    progress_path: str,
+    test_dir: str,
+    scenario_map_path: str,
+    test_results: dict | None = None,
+) -> dict:
     """Phase 5: Update progress and show dashboard."""
     from src.progress_tracker import update_progress, get_dashboard
     print("\n📊 PHASE 5: PROGRESS TRACKING")
     print("━" * 50)
-    update_progress(spec_path, progress_path)
+    progress = update_progress(
+        spec_path,
+        progress_path,
+        test_dir=test_dir,
+        scenario_map_path=scenario_map_path,
+        test_results=test_results,
+    )
+    if "update_skipped" in progress:
+        print(f"  [!] Progress was not updated: {progress['update_skipped']['reason']}")
     dashboard = get_dashboard(progress_path)
     print(dashboard)
-    return {"dashboard": dashboard}
+    return {"dashboard": dashboard, "updated": "update_skipped" not in progress}
 
 
-def run_full_pipeline(spec_path: str, src_dir: str, test_dir: str, progress_path: str, check_packages: bool = True):
+def run_generate(spec_path: str, output_path: str, overwrite: bool = False) -> dict:
+    """Phase 2: Generate a safe, traceable implementation scaffold."""
+    from src.code_generator import generate_scaffold
+
+    print("\n📝 PHASE 2: CODE GENERATION")
+    print("━" * 50)
+    result = generate_scaffold(spec_path, output_path, overwrite=overwrite)
+    print(f"  Feature:     {result['feature']}")
+    print(f"  Scenarios:   {result['scenarios']}")
+    print(f"  Actions:     {', '.join(result['actions']) or 'scenario handlers'}")
+    print(f"  Generated:   {result['output']}")
+    print("━" * 50)
+    return result
+
+
+def run_full_pipeline(
+    spec_path: str,
+    src_dir: str,
+    test_dir: str,
+    progress_path: str,
+    scenario_map_path: str,
+    check_packages: bool = True,
+    generate: bool = False,
+    output_path: str = "generated/feature_scaffold.py",
+    overwrite: bool = False,
+) -> int:
     """Run the full SpecGuard pipeline."""
     print()
     print("╔" + "═" * 50 + "╗")
@@ -118,20 +146,14 @@ def run_full_pipeline(spec_path: str, src_dir: str, test_dir: str, progress_path
     # Phase 1: Analyze
     analyze_result = run_analyze(spec_path)
 
-    # Phase 2: Code generation status (check if src/ exists)
-    print("\n📝 PHASE 2: CODE STATUS")
-    print("━" * 50)
-    py_files = []
-    for root, dirs, files in os.walk(src_dir):
-        dirs[:] = [d for d in dirs if d not in ("__pycache__", ".pytest_cache", ".git")]
-        for f in files:
-            if f.endswith(".py"):
-                py_files.append(os.path.join(root, f))
-    print(f"  Source files: {len(py_files)}")
-    for f in py_files:
-        size = os.path.getsize(f)
-        print(f"    {f} ({size} bytes)")
-    print("━" * 50)
+    if generate:
+        run_generate(spec_path, output_path, overwrite=overwrite)
+    else:
+        print("\n📝 PHASE 2: CODE GENERATION")
+        print("━" * 50)
+        print("  Skipped by default to avoid overwriting implementation code.")
+        print("  Run with --generate to create a traceable scaffold.")
+        print("━" * 50)
 
     # Phase 3: Security scan
     scan_result = run_scan(src_dir, check_packages=check_packages)
@@ -140,7 +162,7 @@ def run_full_pipeline(spec_path: str, src_dir: str, test_dir: str, progress_path
     test_result = run_tests(test_dir)
 
     # Phase 5: Progress tracking
-    track_result = run_track(spec_path, progress_path)
+    track_result = run_track(spec_path, progress_path, test_dir, scenario_map_path, test_result)
 
     # Summary
     print("\n" + "╔" + "═" * 50 + "╗")
@@ -152,12 +174,18 @@ def run_full_pipeline(spec_path: str, src_dir: str, test_dir: str, progress_path
     print(f"║  Tests:       {test_result['passed']} passed, {test_result['failed']} failed".ljust(52) + "║")
     print("╚" + "═" * 50 + "╝")
     print()
+    return int(
+        scan_result["verdict"] == "fail"
+        or not test_result["available"]
+        or not test_result["successful"]
+        or not track_result["updated"]
+    )
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="SpecGuard — Spec-Driven Development Agent")
     parser.add_argument("command", nargs="?", default="full",
-                        choices=["full", "analyze", "scan", "test", "track"],
+                        choices=["full", "analyze", "generate", "scan", "test", "track"],
                         help="Pipeline phase to run (default: full)")
     parser.add_argument("--spec", default="specs/task-manager.feature",
                         help="Path to Gherkin .feature file")
@@ -167,6 +195,14 @@ def main():
                         help="Test directory")
     parser.add_argument("--progress", default="memory/progress.json",
                         help="Progress file path")
+    parser.add_argument("--scenario-map", default="evals/scenario_map.json",
+                        help="Explicit JSON mapping from scenarios to pytest node IDs")
+    parser.add_argument("--generate", action="store_true",
+                        help="Generate a safe implementation scaffold during the full pipeline")
+    parser.add_argument("--output", default="generated/feature_scaffold.py",
+                        help="Output path for the generated scaffold")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="Allow the generate command to replace an existing output file")
     parser.add_argument("--no-packages", action="store_true",
                         help="Skip PyPI package verification (offline mode)")
 
@@ -175,16 +211,33 @@ def main():
     check_pkgs = not args.no_packages
 
     if args.command == "full":
-        run_full_pipeline(args.spec, args.src, args.tests, args.progress, check_pkgs)
+        return run_full_pipeline(
+            args.spec,
+            args.src,
+            args.tests,
+            args.progress,
+            args.scenario_map,
+            check_pkgs,
+            generate=args.generate,
+            output_path=args.output,
+            overwrite=args.overwrite,
+        )
     elif args.command == "analyze":
         run_analyze(args.spec)
+        return 0
+    elif args.command == "generate":
+        run_generate(args.spec, args.output, overwrite=args.overwrite)
+        return 0
     elif args.command == "scan":
-        run_scan(args.src, check_packages=check_pkgs)
+        return int(run_scan(args.src, check_packages=check_pkgs)["verdict"] == "fail")
     elif args.command == "test":
-        run_tests(args.tests)
+        result = run_tests(args.tests)
+        return int(not result["available"] or not result["successful"])
     elif args.command == "track":
-        run_track(args.spec, args.progress)
+        result = run_track(args.spec, args.progress, args.tests, args.scenario_map)
+        return int(not result["updated"])
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

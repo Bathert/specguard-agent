@@ -9,10 +9,12 @@ Usage:
 """
 import json
 import os
-import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+
+from src.evaluation_runner import run_pytest
 
 
 def _now() -> str:
@@ -34,37 +36,40 @@ def _save_progress(path: str, data: dict) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _run_tests(test_dir: str) -> dict:
-    """Run pytest and parse results. Returns {total, passed, failed, failures: [names]}."""
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", test_dir, "-v", "--tb=no"],
-            capture_output=True, text=True, timeout=30,
-        )
-        output = result.stdout + result.stderr
-        passed = []
-        failed = []
-        for line in output.splitlines():
-            line = line.strip()
-            if " PASSED" in line:
-                # Extract test name: evals/test.py::test_name PASSED [ 6%]
-                name = line.split("::")[-1].split(" PASSED")[0].strip()
-                passed.append(name)
-            elif " FAILED" in line:
-                name = line.split("::")[-1].split(" FAILED")[0].strip()
-                failed.append(name)
-        return {"total": len(passed) + len(failed), "passed": passed, "failed": failed}
-    except Exception as e:
-        return {"total": 0, "passed": [], "failed": [], "error": str(e)}
+def _load_scenario_map(path: str) -> dict[str, dict]:
+    """Load explicit scenario-to-test mappings; never infer them from names."""
+    with open(path, "r", encoding="utf-8") as file:
+        mapping = json.load(file)
+    if not isinstance(mapping, dict):
+        raise ValueError("scenario map must be a JSON object")
+    for scenario, entry in mapping.items():
+        if not isinstance(entry, dict) or not isinstance(entry.get("tests"), list):
+            raise ValueError(f"scenario map entry for '{scenario}' must contain a tests list")
+        if not all(isinstance(test, str) and "::" in test for test in entry["tests"]):
+            raise ValueError(f"scenario map entry for '{scenario}' has an invalid test node id")
+        if "files" in entry and not all(isinstance(file, str) for file in entry["files"]):
+            raise ValueError(f"scenario map entry for '{scenario}' has invalid file paths")
+    return mapping
 
 
-def update_progress(spec_path: str, progress_path: str, test_dir: str = "evals/") -> dict:
+def _matches_node_id(reference: str, node_id: str) -> bool:
+    """Match one exact pytest node id, including parametrized instances only."""
+    return node_id == reference or node_id.startswith(f"{reference}[")
+
+
+def update_progress(
+    spec_path: str,
+    progress_path: str,
+    test_dir: str = "evals/",
+    scenario_map_path: str = "evals/scenario_map.json",
+    test_results: Optional[dict] = None,
+) -> dict:
     """
     Full update cycle:
     1. Parse spec → get scenario names
-    2. Run tests → get pass/fail
+    2. Use explicit scenario-to-test mappings to evaluate each scenario
     3. Compare with previous state → detect regressions
-    4. Save updated progress
+    4. Save updated progress only when pytest actually ran
 
     Returns the updated progress dict.
     """
@@ -81,40 +86,44 @@ def update_progress(spec_path: str, progress_path: str, test_dir: str = "evals/"
     prev = _load_progress(progress_path)
     prev_scenarios = prev.get("scenarios", {})
 
-    # Run tests
-    test_results = _run_tests(test_dir)
+    scenario_map = _load_scenario_map(scenario_map_path)
+    test_results = test_results or run_pytest(test_dir)
+    if not test_results.get("available", False):
+        # A missing dependency or collection failure is not a regression. Do not
+        # erase a previously good dashboard merely because the runner is broken.
+        preserved = dict(prev)
+        preserved["update_skipped"] = {
+            "at": _now(),
+            "reason": test_results.get("error", "pytest did not produce usable results"),
+        }
+        return preserved
 
     # Build scenario status map
     new_scenarios = {}
     regressions = []
 
     for name in scenario_names:
+        entry = scenario_map.get(name, {})
+        expected_tests = entry.get("tests", [])
+        files = entry.get("files", [])
         prev_status = prev_scenarios.get(name, {}).get("status", "not_started")
         prev_test = prev_scenarios.get(name, {}).get("test_result", None)
+        matched_results = [
+            result
+            for reference in expected_tests
+            for node_id, result in test_results.get("tests", {}).items()
+            if _matches_node_id(reference, node_id)
+        ]
+        all_files_exist = bool(files) and all(Path(path).is_file() for path in files)
 
-        # Determine current test status by matching test names
-        # Test names follow pattern: test_<scenario_name_snake_case>
-        # But test names may be shorter — match on key words
-        test_name = "test_" + name.lower().replace(" ", "_").replace("(", "").replace(")", "")
-        # Also try matching on first significant word (e.g. "Validate task priority" -> "test_validate")
-        words = [w for w in name.lower().replace("(", "").replace(")", "").split()
-                 if w not in ("a", "an", "the", "to", "by", "and", "is", "has", "with")]
-        first_word = words[0] if words else ""
-        alt_prefix = f"test_{first_word}"
-
-        passed = test_results.get("passed", [])
-        failed = test_results.get("failed", [])
-        is_passing = any(test_name in t or alt_prefix in t for t in passed) if passed else False
-        is_failing = any(test_name in t or alt_prefix in t for t in failed) if failed else False
-
-        if is_passing:
+        if expected_tests and matched_results and all(result == "passed" for result in matched_results):
             status = "tested"
             test_result = "pass"
-        elif is_failing:
+        elif any(result in ("failed", "error") for result in matched_results):
             status = "in_progress"
             test_result = "fail"
         else:
-            status = "not_started" if prev_status == "not_started" else "in_progress"
+            status = "implemented" if all_files_exist else "not_started"
             test_result = None
 
         # Detect regression: was passing, now failing
@@ -126,12 +135,12 @@ def update_progress(spec_path: str, progress_path: str, test_dir: str = "evals/"
             "status": status,
             "last_change": _now(),
             "test_result": test_result,
-            "files": prev_scenarios.get(name, {}).get("files", []),
+            "files": files,
         }
 
     # Calculate metrics
     total = len(scenario_names)
-    implemented = sum(1 for s in new_scenarios.values() if s["status"] in ("implemented", "tested"))
+    implemented = sum(1 for s in new_scenarios.values() if s["status"] in ("implemented", "tested", "in_progress", "regression"))
     tested = sum(1 for s in new_scenarios.values() if s["status"] == "tested")
     coverage_pct = (implemented / total * 100) if total > 0 else 0
     test_pass_pct = (tested / implemented * 100) if implemented > 0 else 0
@@ -147,7 +156,7 @@ def update_progress(spec_path: str, progress_path: str, test_dir: str = "evals/"
             "regression_names": regressions,
             "tests_total": test_results["total"],
             "tests_passed": len(test_results["passed"]),
-            "tests_failed": len(test_results["failed"]),
+            "tests_failed": len(test_results["failed"]) + len(test_results.get("errors", [])),
         },
     }
 

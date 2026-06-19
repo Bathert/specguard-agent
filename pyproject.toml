@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "specguard-agent"
+version = "0.2.0"
+description = "Spec-driven implementation scaffolding, evaluation, and static security checks"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["evals"]
+addopts = "-ra"

@@ -1,0 +1,38 @@
+{
+  "Create a new task": {
+    "tests": ["evals/test_task_manager.py::test_create_new_task"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Assign a task to a user": {
+    "tests": ["evals/test_task_manager.py::test_assign_task"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Complete a task": {
+    "tests": ["evals/test_task_manager.py::test_complete_task"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "List tasks by status": {
+    "tests": ["evals/test_task_manager.py::test_list_tasks_by_status"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Prevent duplicate task titles": {
+    "tests": ["evals/test_task_manager.py::test_prevent_duplicate"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Validate task priority": {
+    "tests": ["evals/test_task_manager.py::test_validate_priority"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Search tasks by keyword": {
+    "tests": ["evals/test_task_manager.py::test_search_tasks"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Delete a task": {
+    "tests": ["evals/test_task_manager.py::test_delete_task"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  },
+  "Cannot assign a completed task": {
+    "tests": ["evals/test_task_manager.py::test_cannot_assign_completed"],
+    "files": ["src/task_manager.py", "evals/test_task_manager.py"]
+  }
+}
